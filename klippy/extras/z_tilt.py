@@ -9,8 +9,6 @@ import probe, mathutil
 class ZTilt:
     def __init__(self, config):
         self.printer = config.get_printer()
-        self.printer.register_event_handler("klippy:connect",
-                                            self.handle_connect)
         z_positions = config.get('z_positions').split('\n')
         try:
             z_positions = [line.split(',', 1)
@@ -29,6 +27,9 @@ class ZTilt:
         self.gcode.register_command(
             'Z_TILT_ADJUST', self.cmd_Z_TILT_ADJUST,
             desc=self.cmd_Z_TILT_ADJUST_help)
+    def printer_state(self, state):
+        if state == 'connect':
+            self.handle_connect()
     def handle_connect(self):
         kin = self.printer.lookup_object('toolhead').get_kinematics()
         z_steppers = kin.get_steppers('Z')
@@ -68,7 +69,7 @@ class ZTilt:
         except:
             logging.exception("z_tilt adjust_steppers")
             for s in self.z_steppers:
-                s.set_ignore_move(False)
+                z.set_ignore_move(False)
             raise
     def adjust_steppers(self, x_adjust, y_adjust, z_adjust):
         toolhead = self.printer.lookup_object('toolhead')

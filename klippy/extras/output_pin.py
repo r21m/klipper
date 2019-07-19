@@ -6,6 +6,8 @@
 
 PIN_MIN_TIME = 0.100
 
+import logging
+
 class PrinterOutputPin:
     def __init__(self, config):
         self.printer = config.get_printer()
@@ -20,6 +22,7 @@ class PrinterOutputPin:
         else:
             self.mcu_pin = ppins.setup_pin('digital_out', config.get('pin'))
             self.scale = 1.
+        logging.info('   digital_out  %s'%config.get('pin'))
         self.mcu_pin.setup_max_duration(0.)
         self.last_value_time = 0.
         static_value = config.getfloat('static_value', None,
