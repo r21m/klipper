@@ -23,6 +23,8 @@ class Heater:
     def __init__(self, config, sensor, gcode_id):
         printer = config.get_printer()
         self.name = config.get_name()
+        #logging.info('Heater name ' + str(self.name))
+
         self.gcode_id = gcode_id
         # Setup sensor
         self.sensor = sensor
@@ -127,6 +129,7 @@ class Heater:
             last_temp = self.last_temp
             last_pwm_value = self.last_pwm_value
         is_active = target_temp or last_temp > 50.
+        #logging.info('Heater name stats ' + str(self.name))
         return is_active, '%s: target=%.0f temp=%.1f pwm=%.3f' % (
             self.name, target_temp, last_temp, last_pwm_value)
     def get_status(self, eventtime):

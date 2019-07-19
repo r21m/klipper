@@ -43,7 +43,7 @@ def get_cpu_info():
         f = open('/proc/cpuinfo', 'rb')
         data = f.read()
         f.close()
-    except IOError, OSError:
+    except OSError:
         logging.debug("Exception on read /proc/cpuinfo: %s",
                       traceback.format_exc())
         return "?"

@@ -6,6 +6,7 @@
 import sys, os, zlib, logging, math
 import serialhdl, pins, chelper, clocksync
 
+import gcode
 class error(Exception):
     pass
 
@@ -29,6 +30,9 @@ class MCU_stepper:
         self._mcu.register_stepqueue(self._stepqueue)
         self._stepper_kinematics = self._itersolve_gen_steps = None
         self.set_ignore_move(False)
+        #debug
+        #self.printer = config.get_printer()
+        #self.gcode = self.printer.lookup_object('gcode')
     def get_mcu(self):
         return self._mcu
     def setup_dir_pin(self, pin_params):
@@ -75,12 +79,16 @@ class MCU_stepper:
             self._stepper_kinematics, coord[0], coord[1], coord[2])
     def set_position(self, coord):
         self.set_commanded_position(self.calc_position_from_coord(coord))
+        #self.gcode.respond_info("mucu coord     " +str(coord))
+        logging.info("mucu coord     " +str(coord))
     def get_commanded_position(self):
         return self._ffi_lib.itersolve_get_commanded_pos(
             self._stepper_kinematics)
     def set_commanded_position(self, pos):
         self._mcu_position_offset += self.get_commanded_position() - pos
         self._ffi_lib.itersolve_set_commanded_pos(self._stepper_kinematics, pos)
+        #self.gcode.respond_info("mucu pos     " +str(pos))
+        logging.info("mucu pos     " +str(pos))
     def get_mcu_position(self):
         mcu_pos_dist = self.get_commanded_position() + self._mcu_position_offset
         mcu_pos = mcu_pos_dist / self._step_dist
@@ -146,8 +154,7 @@ class MCU_endstop:
         self._oid = self._home_cmd = self._query_cmd = None
         self._mcu.register_config_callback(self._build_config)
         self._homing = False
-        self._min_query_time = 0.
-        self._next_query_print_time = 0.
+        self._min_query_time = self._next_query_time = 0.
         self._last_state = {}
     def get_mcu(self):
         return self._mcu
@@ -181,17 +188,15 @@ class MCU_endstop:
                                , self._oid)
     def home_prepare(self):
         pass
-    def home_start(self, print_time, sample_time, sample_count, rest_time,
-                   triggered=True):
+    def home_start(self, print_time, sample_time, sample_count, rest_time):
         clock = self._mcu.print_time_to_clock(print_time)
         rest_ticks = int(rest_time * self._mcu.get_adjusted_freq())
         self._homing = True
         self._min_query_time = self._mcu.monotonic()
-        self._next_query_print_time = print_time + self.RETRY_QUERY
+        self._next_query_time = self._min_query_time + self.RETRY_QUERY
         self._home_cmd.send(
             [self._oid, clock, self._mcu.seconds_to_clock(sample_time),
-             sample_count, rest_ticks, triggered ^ self._invert],
-            reqclock=clock)
+             sample_count, rest_ticks, 1 ^ self._invert], reqclock=clock)
         for s in self._steppers:
             s.note_homing_start(clock)
     def home_wait(self, home_end_time):
@@ -225,15 +230,13 @@ class MCU_endstop:
                 raise self.TimeoutError("Timeout during endstop homing")
         if self._mcu.is_shutdown():
             raise error("MCU is shutdown")
-        est_print_time = self._mcu.estimated_print_time(eventtime)
-        if est_print_time >= self._next_query_print_time:
-            self._next_query_print_time = est_print_time + self.RETRY_QUERY
+        if eventtime >= self._next_query_time:
+            self._next_query_time = eventtime + self.RETRY_QUERY
             self._query_cmd.send([self._oid])
         return True
     def query_endstop(self, print_time):
         self._homing = False
-        self._min_query_time = self._mcu.monotonic()
-        self._next_query_print_time = print_time
+        self._min_query_time = self._next_query_time = self._mcu.monotonic()
     def query_endstop_wait(self):
         eventtime = self._mcu.monotonic()
         while self._check_busy(eventtime):
@@ -278,6 +281,10 @@ class MCU_digital_out:
             "schedule_digital_out oid=%c clock=%u value=%c", cq=cmd_queue)
     def set_digital(self, print_time, value):
         clock = self._mcu.print_time_to_clock(print_time)
+
+        #logging.info('  _oid %s  clock %s, value %s, _invert %s, last_clock %s'%(self._oid,clock,value,self._invert,self._last_clock))
+
+
         self._set_cmd.send([self._oid, clock, (not not value) ^ self._invert],
                            minclock=self._last_clock, reqclock=clock)
         self._last_clock = clock
@@ -427,10 +434,6 @@ class MCU:
         self._name = config.get_name()
         if self._name.startswith('mcu '):
             self._name = self._name[4:]
-        self._printer.register_event_handler("klippy:connect", self._connect)
-        self._printer.register_event_handler("klippy:shutdown", self._shutdown)
-        self._printer.register_event_handler("klippy:disconnect",
-                                             self._disconnect)
         # Serial port
         self._serialport = config.get('serial', '/dev/ttyS0')
         baud = 0
@@ -773,6 +776,13 @@ class MCU:
             self._mcu_tick_stddev)
         return False, ' '.join([msg, self._serial.stats(eventtime),
                                 self._clocksync.stats(eventtime)])
+    def printer_state(self, state):
+        if state == 'connect':
+            self._connect()
+        elif state == 'disconnect':
+            self._disconnect()
+        elif state == 'shutdown':
+            self._shutdown()
     def __del__(self):
         self._disconnect()
 
