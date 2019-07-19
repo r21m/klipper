@@ -26,32 +26,29 @@ class PrinterLCD:
         # printer objects
         self.gcode = self.toolhead = self.sdcard = None
         self.fan = self.extruder0 = self.extruder1 = self.heater_bed = None
-        self.printer.register_event_handler("klippy:ready", self.handle_ready)
         # screen updating
         self.screen_update_timer = self.reactor.register_timer(
             self.screen_update_event)
     # Initialization
-    def handle_ready(self):
-        self.lcd_chip.init()
-        # Load printer objects
-        self.gcode = self.printer.lookup_object('gcode')
-        self.toolhead = self.printer.lookup_object('toolhead')
-        self.sdcard = self.printer.lookup_object('virtual_sdcard', None)
-        self.fan = self.printer.lookup_object('fan', None)
-        self.extruder0 = self.printer.lookup_object('extruder0', None)
-        self.extruder1 = self.printer.lookup_object('extruder1', None)
-        self.heater_bed = self.printer.lookup_object('heater_bed', None)
-        self.prg_time = .0
-        self.progress = None
-        self.msg_time = None
-        self.message = None
-        self.gcode.register_command('M73', self.cmd_M73)
-        self.gcode.register_command('M117', self.cmd_M117)
-        # Start screen update timer
-        self.reactor.update_timer(self.screen_update_timer, self.reactor.NOW)
-    # Get menu instance
-    def get_menu(self):
-        return self.menu
+    def printer_state(self, state):
+        if state == 'ready':
+            self.lcd_chip.init()
+            # Load printer objects
+            self.gcode = self.printer.lookup_object('gcode')
+            self.toolhead = self.printer.lookup_object('toolhead')
+            self.sdcard = self.printer.lookup_object('virtual_sdcard', None)
+            self.fan = self.printer.lookup_object('fan', None)
+            self.extruder0 = self.printer.lookup_object('extruder0', None)
+            self.extruder1 = self.printer.lookup_object('extruder5', None)
+            self.heater_bed = self.printer.lookup_object('heater_bed', None)
+            self.prg_time = .0
+            self.progress = None
+            self.msg_time = None
+            self.message = None
+            self.gcode.register_command('M73', self.cmd_M73)
+            self.gcode.register_command('M117', self.cmd_M117)
+            # Start screen update timer
+            self.reactor.update_timer(self.screen_update_timer, self.reactor.NOW)
     # Graphics drawing
     def animate_glyphs(self, eventtime, x, y, glyph_name, do_animate):
         frame = do_animate and int(eventtime) & 1
@@ -245,10 +242,9 @@ class PrinterLCD:
     def cmd_M117(self, params):
         if '#original' in params:
             msg = params['#original']
-            umsg = msg.upper()
-            if not umsg.startswith('M117'):
+            if not msg.startswith('M117'):
                 # Parse out additional info if M117 recd during a print
-                start = umsg.find('M117')
+                start = msg.find('M117')
                 end = msg.rfind('*')
                 msg = msg[start:end]
             if len(msg) > 5:
