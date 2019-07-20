@@ -13,9 +13,9 @@ import time
 class error(Exception):
     pass
 
-####################
-#MMU2 control class#
-####################
+########################################################################################################################
+#MMU2 control class                                                                                                    #
+########################################################################################################################
 
 class MMU2control:
     error = error
@@ -77,7 +77,8 @@ class MMU2control:
         self.mmu2mem = mmu2_memory()
         self.init_scripts()
         self.init_commands()
-
+        #M702 used mem: [True,False,False....]
+        self.used_during_print = [False for x in range(self.unit_count*self.tool_per_unit)]
 
     def printer_state(self, state):
         if (state == 'ready'):
@@ -126,16 +127,13 @@ class MMU2control:
             change_timeout = self.change_timeout)
 
     def init_scripts(self):
-        #script#
+        #script single
         self.load_unload_profiles = self.config.getint('load_unload_profiles', minval = 1, maxval = (self.tool_per_unit*self.unit_count), default=1)
         self.gcode_before_M6 = self.config.get('gcode_before_m6', '')
         self.gcode_after_M6 = self.config.get('gcode_after_m6', '')
         self.gcode_if_fail_M6 = self.config.get('gcode_if_fail_m6', '')
         self.gcode_if_runout = self.config.get('gcode_if_runout', '')
         #list script
-
-        # lu = [0,0,0,0,0,0,0,0,0]
-        #
         self.lu_mem = []
         self.gcode_load_profile = []
         self.gcode_unload_profile = []
@@ -167,10 +165,11 @@ class MMU2control:
         self.desc_QUERY_MMU2 = ''
         self.desc_SET_MMU2 = ''
         self.desc_RESET_MMU2 = ''
-        #commands
+        #commands prusa MK3s https://github.com/prusa3d/Prusa-Firmware/wiki/Supported-G-codes
         self.gcode.register_command('M403',self.cmd_M403,desc=self.desc_M403)
         self.gcode.register_command('M701',self.cmd_M701,desc=self.desc_M701)
         self.gcode.register_command('M702',self.cmd_M702,desc=self.desc_M702)
+        #commands mmu2control
         self.gcode.register_command('M6',self.cmd_M6,desc=self.desc_M6)
         self.gcode.register_command('QUERY_MMU2',self.cmd_QUERY_MMU2,desc=self.desc_QUERY_MMU2)
         self.gcode.register_command('SET_MMU2',self.cmd_SET_MMU2,desc=self.desc_SET_MMU2)
@@ -215,7 +214,7 @@ class MMU2control:
             if params['T'] == (None or ('')):
                 self.gcode.respond_info('MMU2 control M6: unload')
                 self.set_message('Unloading filament')
-                self.unload_filament_from_extruder(act_unit_index,T_param)
+                self.unload_filament_from_extruder(T_param)
                 self.unit[act_unit_index].unload_filament()
                 self.active_tool = None
                 self.store()
@@ -231,7 +230,7 @@ class MMU2control:
                 self.gcode.respond_info('MMU2 control M6: T<old> = T<new> no change, unit change')
                 self.set_message('T<old>=T<new> unit change')
                 self.call_abort(index)
-                self.load_filament_to_extruder(index,T_param)
+                self.load_filament_to_extruder(T_param)
                 self.active_tool = T_param_unit
                 self.store()
                 self.gcode.run_script_from_command(self.gcode_if_unit_after_M6[index])
@@ -250,7 +249,7 @@ class MMU2control:
         self.gcode.run_script_from_command(self.gcode_if_unit_before_M6[index])
 
         if (finda == (True or None)):
-            self.unload_filament_from_extruder(index,T_param)
+            self.unload_filament_from_extruder(T_param)
 
         #change begin
         self.gcode.run_script_from_command(self.gcode_before_M6)
@@ -273,20 +272,20 @@ class MMU2control:
         #loading to extruder
         for q in range(self.continue_loading_count):
            self.call_continue_loading(index)
-        else:
-           self.call_abort(index)
-           self.reactor_pause(1)
-
-        self.load_filament_to_extruder(index,T_param)
+        self.call_abort(index)
+        self.load_filament_to_extruder(T_param)
         self.reactor_pause(1)
         #Set variables
         self.active_tool = T_param
+        #M702 compat
+        self.used_during_print[self.active_tool] = True
         #store
         self.store()
 
         self.gcode.run_script_from_command(self.gcode_if_unit_after_M6[index])
         self.gcode.run_script_from_command(self.gcode_after_M6)
         #info
+        self.gcode.respond('SelectExtruder:%s'%(self.active_tool)) #response for repetierServer
         self.gcode.respond_info('MMU2 control: Tool change finished, active T:%s'%(self.active_tool))
         self.set_message('Active T:%s'%(self.active_tool))
         return
@@ -309,7 +308,7 @@ class MMU2control:
 
     def cmd_M701(self, params):
         '''
-        load filamen to MMU
+        load filament to MMU
         M701 E<num>
         '''
         if ('E') in params:
@@ -322,58 +321,45 @@ class MMU2control:
             return
 
     def cmd_M702(self, params):
+        act_unit_index,act_t_unit = self.get_correct_values(self.active_tool)
         '''
         U<num> unload
         C unload from nozzle
         L<num> load filament to MMU
+
+
+        ("M702 C")); //unload from nozzle
+        ("M702 U")); //used
+
+        M702 Unloads all filaments
+        M702 U Unloads all filaments used during print
+        M702 C Unloads filament in currently active extruder
+
         '''
-        is_C = is_U = is_L = False
-        cnum = unum = lnum = None
-
-        is_C,cnum = self.get_int_value_from_param(params,'C')
-        is_U,unum = self.get_int_value_from_param(params,'U')
-        is_L,lnum = self.get_int_value_from_param(params,'L')
-
-        T_active = self.active_tool
-        act_unit_index = None
-        act_t_unit = None
-        act_unit_index,act_t_unit = self.get_correct_values(T_active)
-
-        if not (bool(is_C) ^ bool(is_U) ^ bool(is_L)):
-            self.gcode.respond_info('MMU2 control: M702 Wrong parameter')
+        if not('U') in params and ('C') in params:
+            for unit_index in range(self.unit_count):
+                if self.unit(unit_index).state['finda']:
+                    self.unload_filament_from_extruder(unit_index * self.tool_per_unit)
+                for tool in range(self.tool_per_unit):
+                    self.call_filament_unload(tool,unit_index)
             return
 
-        if (is_U):
-            index,T_param_unit = self.get_correct_values(unum)
-            if self.unit[index].state['finda']:
-                self.gcode.respond_info('MMU2 control: M702 unit%s filament detected!' %(index))
-                return
-            self.unload_filament_from_extruder(index,T_param_unit)
-            self.call_filament_unload(T_param_unit,index)
-            self.active_tool = None
-            self.store()
+        if not('U') in params:
+            u_param = self.gcode.get_int('U', params, minval=0, maxval=self.maxval_t, default=0)
+            for used_tool in range(self.tool_per_unit * self.unit_count):
+                unit_index,act_t_unit = self.get_correct_values(used_tool)
+                if self.used_during_print[used_tool]:
+                   if self.unit(unit_index).state['finda']:
+                        self.unload_filament_from_extruder(used_tool)
+                   self.unload_filament_from_extruder()
+                   self.call_filament_unload(used_tool,unit_index)
+            return
 
-
-        if (is_L and lnum != None):
-            index,T_param_unit = self.get_correct_values(lnum)
-            self.call_load_filament(T_param_unit,index)
-
-
-        if (is_C):# unload current active      #U0
-            index,T_param_unit = self.get_correct_values(unum)
-            self.unload_filament_from_extruder(index,T_param_unit)
-            if (act_unit_index == None) and (cnum == None):
-                for q in range(self.unit_count):self.call_filament_unload(0,q)
-                self.active_tool = None
-
-            elif (act_unit_index == None) and not (cnum == None):
-                self.call_filament_unload(0,cnum)
-
-            elif  (act_unit_index >= 0) and (cnum == None):
-                self.call_filament_unload(0,act_unit_index)
-
-        if self.unit[act_unit_index].state['cmd_state'] ==('fail'):
-            raise error('MMU control: M702 error')
+        if ('C') in params:
+            c_param = self.gcode.get_int('C', params, minval=0, maxval=self.maxval_t, default=0)
+            self.unload_filament_from_extruder(self.active_tool)
+            self.call_filament_unload(act_t_unit,act_unit_index)
+            return
 
     def cmd_SET_MMU2(self,params):
 
@@ -450,8 +436,7 @@ class MMU2control:
         self.gcode.respond_info('<<<TEST0>>>')
         logging.info('<<<TEST0>>>')
         #
-        ext = kinematics.extruder.get_printer_extruders(self.printer)
-        self.gcode.respond_info(str(ext))
+
         #
         logging.info('<<<TEST0>>>')
         self.gcode.respond_info('<<<TEST0>>>')
@@ -506,8 +491,28 @@ class MMU2control:
                 return
         return is_key,num
 #--------------------------------------------------
+#call
+    def call_filament_change(self,tool,unit_index):
+        self.extruder_motor_off(unit_index)
+        self.unit[unit_index].filament_change(tool)
 
-    def check_move_extruder(self,unit_num):
+        if self.unit[unit_index].state['cmd_state'] == ('ready'): return True
+        else: return False
+
+    def call_load_filament(self,tool,unit_index):
+        self.unit[unit_index].load_filament(tool)
+
+    def call_continue_loading(self,unit_index):
+        self.gcode.respond_info('MMU2 control: Continue loading...')
+        self.unit[unit_index].continue_loading()
+
+    def call_filament_unload(self,tool,unit_index):
+        self.unit[unit_index].unload_filament(tool)
+
+    def call_abort(self,unit_index):
+        self.unit[unit_index].abort()
+# check temp
+    def check_extruder_temperature(self,unit_num):
        '''
        testuje teplotu extruderu pro vymenu
        '''
@@ -529,49 +534,38 @@ class MMU2control:
            return False
        else:
            return True
-#call
-    def call_filament_change(self,tool,unit_index):
-        self.extruder_motor_off(unit_index)
-        self.unit[unit_index].filament_change(tool)
-
-        if self.unit[unit_index].state['cmd_state'] == ('ready'): return True
-        else: return False
-
-    def call_load_filament(self,tool,unit_index):
-        self.unit[unit_index].load_filament(tool)
-
-    def call_continue_loading(self,unit_index):
-        self.gcode.respond_info('MMU2 control: Continue loading...')
-        self.unit[unit_index].continue_loading()
-
-    def call_filament_unload(self,tool,unit_index):
-        self.unit[unit_index].unload_filament(tool)
-
-    def call_abort(self,unit_index):
-        self.unit[unit_index].abort()
-
 #load/unload to extruder
-    def load_filament_to_extruder(self,index = 0,tool = 0):
-        #self.gcode.respond_info('Load filament')
-        self.check_move_extruder(index)
-        try:
-            profile_num = self.lu_mem[tool]
-            self.gcode.run_script_from_command(self.gcode_load_profile[profile_num])
-        except IndexError:
-            self.gcode.run_script_from_command(self.gcode_load_profile[0])
+    def load_filament_to_extruder(self,tool):
+        self.wait_for_finish_scripts()
+        act_unit_index,act_t_unit = self.get_correct_values(tool)
+        self.check_extruder_temperature(act_unit_index)
+        _tool = act_unit_index * self.tool_per_unit
+        self.cmd_Tn(_tool)
+        self.reactor_pause(0.1)
+
+        try: profile_num = self.lu_mem[tool]
+        except IndexError: profile_num = 0
+
+        self.gcode.respond_info('Load filament, profile:%i tool:%i' %(profile_num,tool))
+        self.gcode.run_script_from_command(self.gcode_load_profile[profile_num])
         self.wait_for_finish_scripts()
 
-    def unload_filament_from_extruder(self,index = 0,tool = 0):
-        #self.gcode.respond_info('Unload filament')
+    def unload_filament_from_extruder(self,tool):
         self.wait_for_finish_scripts()
-        self.check_move_extruder(index)
-        try:
-            profile_num = self.lu_mem[tool]
-            self.gcode.run_script_from_command(self.gcode_unload_profile[profile_num])
-        except IndexError:
-            self.gcode.run_script_from_command(self.gcode_unload_profile[0])
+
+        act_unit_index,act_t_unit = self.get_correct_values(tool)
+        self.check_extruder_temperature(act_unit_index)
+        _tool = act_unit_index * self.tool_per_unit
+        self.cmd_Tn(_tool)
+        self.reactor_pause(0.1)
+
+        try: profile_num = self.lu_mem[tool]
+        except IndexError: profile_num = 0
+
+        self.gcode.respond_info('Unload filament, profile:%i tool:%s' %(profile_num,tool))
+        self.gcode.run_script_from_command(self.gcode_unload_profile[profile_num])
         self.wait_for_finish_scripts()
-        self.extruder_motor_off(index)
+        self.extruder_motor_off(act_unit_index)
 
     def wait_for_finish_scripts(self):
         self.toolhead.wait_moves()
@@ -627,17 +621,20 @@ class MMU2control:
             self.active_tool = None
         logging.info('\tactive tool:%s'%(self.active_tool))
 
-        _active_tool_in_unit = mem['active_tool_in_unit']
+        try:
+            _active_tool_in_unit = mem['active_tool_in_unit']
+        except KeyError:
+            _active_tool_in_unit = [None for x in range(self.unit_count)]
 
-        if self.active_tool != None: self.set_Tn(self.active_tool)
+        #if self.active_tool != None: self.cmd_Tn(self.active_tool)
+        #else: self.cmd_Tn(0)
 
         for q in range(self.unit_count):
+           self.unit[q].state['active_tool_in_unit'] = _active_tool_in_unit[q]
+
            tool = ('None')
            if _active_tool_in_unit[q] != None: tool = str(_active_tool_in_unit[q])
-
-           self.unit[q].state['active_tool'] = _active_tool_in_unit[q]
            logging.info('\tactive tool:%s in unit:%s'%(tool,q))
-
         try:
             self.lu_mem = mem['lu_mem']
         except KeyError:
@@ -663,17 +660,25 @@ class MMU2control:
         logging.info('MMU2 control store: RESET')
         self.mmu2mem.write(mem)
 
-    def set_Tn(self,Tn):
-        #self.gcode.cmd_Tn(Tn)
-        self.gcode.respond('T:%s'%(Tn))
+    def cmd_Tn(self, tool):
+        self.gcode.respond_info('cmd_Tn:%i'%tool)
+        #without call script
+        extruders = kinematics.extruder.get_printer_extruders(self.printer)
+
+        self.toolhead.set_extruder(extruders[tool])
+        self.gcode.extruder = extruders[tool]
+        self.gcode.reset_last_position()
+        self.gcode.extrude_factor = 1.
+        self.gcode.base_position[3] = self.gcode.last_position[3]
+        self.gcode.actual_tool = tool
 
     def get_print_time(self):
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         return print_time
 
     def reactor_pause(self,time):
-        _eventtime = self.reactor.monotonic()
-        _eventtime = self.reactor.pause(_eventtime + time)
+        #eventtime = self.reactor.monotonic()
+        self.reactor.pause((self.reactor.monotonic()) + time)
     #LCD
     def set_message(self,msg,msg_time = None):
         if self.display != None:
@@ -1046,7 +1051,7 @@ class mmu2():
             flush = self.mmu2_serial.readline()
             self.reactor_pause(0.05)
         except serial.SerialException:
-            pass
+            pass    #???
         return
 
     def get_unit_index(self):
@@ -1057,8 +1062,7 @@ class mmu2():
         return print_time
 
     def reactor_pause(self,time):
-        _eventtime = self.reactor.monotonic()
-        _eventtime = self.reactor.pause(_eventtime + time)
+        self.reactor.pause((self.reactor.monotonic()) + time)
 
     def callback_finda(self,eventtime):
         self.state['print_time'] = self.printer.lookup_object('toolhead').get_last_move_time()
