@@ -521,9 +521,9 @@ class MMU2control:
             self.gcode.respond_error('MMU2 control: multitool parameter is grater than units')
             return None
 
-        tool = [None for x in range(self.unit_count))]
+        tool = [None for x in range(self.unit_count)]
         unit_num = [None for x in range(self.unit_count)]
-        t_unit = [None for x in range(self.unit_count))]
+        t_unit = [None for x in range(self.unit_count)]
 
         for q in range(self.unit_count):
             try:
