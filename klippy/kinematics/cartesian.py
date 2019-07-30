@@ -38,6 +38,7 @@ class CartKinematics:
             dc_rail = stepper.LookupMultiRail(dc_config)
             dc_rail.setup_itersolve('cartesian_stepper_alloc', dc_axis)
             dc_rail.set_max_jerk(max_halt_velocity, max_accel)
+            self.active_carr = 0
             self.dual_carriage_rails = [
                 self.rails[self.dual_carriage_axis], dc_rail]
             self.printer.lookup_object('gcode').register_command(
@@ -66,10 +67,7 @@ class CartKinematics:
         else:
             forcepos[axis] += 1.5 * (position_max - hi.position_endstop)
         # Perform homing
-        limit_speed = None
-        if axis == 2:
-            limit_speed = self.max_z_velocity
-        homing_state.home_rails([rail], forcepos, homepos, limit_speed)
+        homing_state.home_rails([rail], forcepos, homepos)
     def home(self, homing_state):
         # Each axis is homed independently and in order
         for axis in homing_state.get_axes():
@@ -138,6 +136,7 @@ class CartKinematics:
         toolhead.set_position(self.calc_position() + [extruder_pos])
         if self.limits[dc_axis][0] <= self.limits[dc_axis][1]:
             self.limits[dc_axis] = dc_rail.get_range()
+        self.active_carr = carriage    
         self.need_motor_enable = True
     cmd_SET_DUAL_CARRIAGE_help = "Set which carriage is active"
     def cmd_SET_DUAL_CARRIAGE(self, params):
@@ -145,6 +144,8 @@ class CartKinematics:
         carriage = gcode.get_int('CARRIAGE', params, minval=0, maxval=1)
         self._activate_carriage(carriage)
         gcode.reset_last_position()
+    def get_active_carr(self):
+        return self.active_carr     
 
 def load_kinematics(toolhead, config):
     return CartKinematics(toolhead, config)
