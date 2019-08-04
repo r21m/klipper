@@ -1,3 +1,4 @@
+
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 #
@@ -73,7 +74,7 @@ class MMU:
         msg = ('MMU: not ready')
         self.state = ('not ready')
         logging.info(msg)
-        self.gcode.respond(msg)
+        self.gcode.respond_info(msg)
         self.init_display()
         self.toolhead = self.printer.lookup_object('toolhead')
         self.heaters = self.printer.lookup_object('heater')
@@ -89,10 +90,10 @@ class MMU:
             logging.info('\tmemory file is empty, setting default') 
             self.store()
             
-        logging.info('\tmemory: %s'%(mem)) 
+        #logging.info('\tmemory: %s'%(mem)) 
         msg = ('MMU: ready')
         logging.info(msg)
-        self.gcode.respond(msg)
+        self.gcode.respond_info(msg)
         self.state = ('ready')
 
     def init_scripts(self):
@@ -100,10 +101,6 @@ class MMU:
         cz:
         Slouzi k nacteni skriptu, bud single nebo list[]
         '''
-    
-        #logging.info('\tloading scripts')
-           #script single
-
         self.gcode_before_M6 = self.config.get('gcode_before_m6', '')
         self.gcode_after_M6 = self.config.get('gcode_after_m6', '')
         #self.gcode_if_fail_M6 = self.config.get('gcode_if_fail_m6', '') #zatim nepouzito
@@ -185,22 +182,21 @@ class MMU:
             self.set_message('M6 not enabled')
             self.state = ('ready')
             return
-            
-        self.gcode.respond('MMU: M6: prepare')
-        self.set_message('Prepare change') 
-           
+                       
         if not ('T') in params:
             self.gcode.respond_error('MMU M6: T missing')
             self.state = ('ready')
-            return  
+            return
+            
+        self.gcode.respond_info('MMU: M6: prepare')
+        self.set_message('Prepare change')       
 
         if ('T') in params:
             tools = self.get_tool_list_from_t_param_M6(params)
-            #self.gcode.respond('>>>tools: %s' %(tools))
             inactive_temp = (self.min_temp + 10)
 
             if tools is None:
-                self.gcode.respond('MMU M6: T<None> unload')
+                self.gcode.respond_info('MMU M6: T<None> unload')
                 self.set_message('Unloading filament')
                 for tool in self.active_tool_in_group:
                     if tool is not None:
@@ -219,7 +215,7 @@ class MMU:
                 self.singleload(tools[0])
                 return
             else:
-                self.cmd_M6_multi(tools)
+                self.multiload(tools)
                 return
            
     def singleload(self,tool):
@@ -261,10 +257,13 @@ class MMU:
                 self.run_script_from_command(self.gcode_after_M6)
                 self.active_tool = tool
                 self.store()
-                if self.temp_control:# snizit teplotu inaktivni skupiny 
-                    t = ('T%s'%self.extruder_group[old_group][0])
-                    self.extruder_printing_temperature[old_group] = temp_dict[t]['set'] 
-                    self.set_extruder_inactive_temperature(inactive_temp,old_tool_in_group)
+                if self.temp_control:# snizit teplotu inaktivni skupiny/skupin
+                    for tool in self.active_tool_in_group:
+                        if tool != self.active_tool:
+                            group = self.find_tool_group(tool)
+                            t = ('T%s'%self.extruder_group[group][0])
+                            self.extruder_printing_temperature[group] = temp_dict[t]['set'] 
+                            self.set_extruder_inactive_temperature(inactive_temp,tool)
                 return
                 
         #pokud je zadany nastroj ve stejne skupine,provest unload                       
@@ -294,13 +293,17 @@ class MMU:
         self.store()
         self.run_script_from_command(self.gcode_new_group[tool_group]) #E10 F200...
         self.run_script_from_command(self.gcode_after_M6)
-        #snizit teplotu inactivni skupiny
-        if (tool_group != old_group) and self.temp_control:
-            t = ('T%s'%self.extruder_group[old_group][0])
-            self.extruder_printing_temperature[old_group] = temp_dict[t]['set'] 
-            self.set_extruder_inactive_temperature(inactive_temp,self.active_tool)
+        #snizit teplotu inactivni skupiny/skupin
+        if self.temp_control:
+            for tool in self.active_tool_in_group:
+                if tool != self.active_tool:
+                    group = self.find_tool_group(tool)
+                    t = ('T%s'%self.extruder_group[group][0])
+                    self.extruder_printing_temperature[old_group] = temp_dict[t]['set'] 
+                    self.set_extruder_inactive_temperature(inactive_temp,tool)
+                    
         #info
-        self.gcode.respond('SelectExtruder:%s'%(self.active_tool)) #response for repetierServer, rict rep.serveru ze je aktivni jiny nastroj
+        self.gcode.respond_info('SelectExtruder:%s'%(self.active_tool)) #response for repetierServer, rict rep.serveru ze je aktivni jiny nastroj
         self.gcode.respond_info('MMU Tool change finished, active T:%s'%(self.active_tool))
         self.set_message('Active T:%s'%(self.active_tool))
         self.state = ('ready')
@@ -311,15 +314,10 @@ class MMU:
         cz:
         Provadi vymenu filamentu:
         M6 T<num>,<num> vymeni/zavede filament <num>,<num> aktivni filament bude 0 v rade
+        tato moznost je pouze pro tiskarny ktere maji vice hotendu, tj grup
         
         '''
-        self.gcode.respond_error('Not implemented yet T:%s'%(tools))
-        
-        tool_groups = [None for x in range(self.extruder_groups)]
-        
-        for q in range(len(tools)):
-            tool_groups[q] = self.find_tool_group(tool)
-            old_tool_group[q] = self.find_tool_group(self.self.active_tool_in_group[q])
+        #self.gcode.respond_error('Not implemented yet T:%s'%(tools))
         
         if self.temp_control:
             inactive_temp = (self.min_temp + 10)
@@ -330,24 +328,59 @@ class MMU:
                 self.gcode.respond_error('MMU M6: error, filament is not introduced')
                 self.state = ('ready')
                 return
+        self.gcode.respond_info('>>> multiload 1  tools:%s ' %(tools))
                     
         self.run_script_from_command(self.gcode_before_M6)
-        # provest unload stavajicich T, vyprazdneni jako pri M6 T  
-        for tool,group in self.active_tool_in_group,old_tool_group:
+        # provest unload stavajicich T, vyprazdneni jako pri M6 T, 
+        # unload se neprovede pokud je zadany nastroj ve skupine aktivnich  
+        for tool in self.active_tool_in_group:
            if tool is not None:
-               self.run_script_from_command(self.gcode_old_tool[tool])
-               self.unload_filament_from_extruder(tool)
-               self.active_tool_in_group[old_groups] = None 
+               group = self.find_tool_group(tool)
+               if tool != self.active_tool_in_group[group]:
+                   self.run_script_from_command(self.gcode_old_tool[tool])
+                   self.unload_filament_from_extruder(tool)
+                   self.active_tool_in_group[group] = None
+                
         #jsou prazdne hotendy, load tools, ale v poradi -1,0...
         #pro zjednoduseni zamenit poradi prvku [], pak bude aktivni nastroj posledni v listu. 
         #[1,3] -> [3,1], zobecnit na libovolny pocet
         #aktivovany nastroj bude mit index -1 
         tools.reverse()
-        tool_groups.reverse()
 
+        #provest multiload
+        for tool in tools:
+            group = self.find_tool_group(tool)
+            if tool != self.active_tool_in_group[group]:
+                self.run_script_from_command(self.gcode_new_tool[tool])
+                self.load_filament_to_extruder(tool)
+                self.active_tool_in_group[group] = tool
         
-
-
+        self.gcode.respond_info('>>>multiload 2  tools:%s ' %(tools))
+        #M702 compat
+        for tool in tools:
+            self.used_during_print[tool] += 1
+        #Set variables
+        self.active_tool = tools[-1]
+        #store
+        self.store()
+        #
+        #self.run_script_from_command(self.gcode_old_group[(self.find_tool_group(tools[0]))] #E10 F200...
+        #self.run_script_from_command(self.gcode_new_group[(self.find_tool_group(self.active_tool))]) #E10 F200...
+        self.run_script_from_command(self.gcode_after_M6)
+        
+        #snizit teplotu inactivnich skupin
+        if self.temp_control:
+            for tool in tools:
+                if tool != self.active_tool:
+                    group = self.find_tool_group(tool)
+                    t = ('T%s'%(self.extruder_group[group][0]))
+                    self.extruder_printing_temperature[group] = temp_dict[t]['set'] 
+                    self.set_extruder_inactive_temperature(inactive_temp,tool)
+        
+        self.gcode.respond_info('SelectExtruder:%s'%(self.active_tool)) #response for repetierServer, rict rep.serveru ze je aktivni jiny nastroj
+        self.gcode.respond_info('MMU Tool change finished, active T:%s'%(self.active_tool))
+        self.set_message('Active T:%s'%(self.active_tool))
+        self.state = ('ready')
         return
 
     def cmd_M701(self, params):
@@ -359,12 +392,13 @@ class MMU:
         if ('E') in params:
             tools = self.get_tool_list_from_t_param(params, ('E'))
             for tool in tools:
+                self.gcode.respond_info('M703: E%s'%(tool))
                 self.pulldown_filament(tool)
                 self.reactor_pause(2)
             self.state = ('ready')
             return
         else:
-            self.gcode.respond_info('MMU2 control: M703: parameter error')
+            self.gcode.respond_error('M703: parameter error')
             self.state = ('ready')
 
     def cmd_M702(self, params):
@@ -543,7 +577,6 @@ class MMU:
             return None
         toolstring = tools.split(',')
         tool_list = []
-        self.gcode.respond('>>> %s %s'%(tools,toolstring))
         for q in (toolstring):
             try:
                 if (int(q)) > self.maxval_t:
@@ -608,13 +641,22 @@ class MMU:
             temp_dict[gcode_id] = {'read':round(cur,_rnd),'set':target}
         return temp_dict
         
-    def set_extruder_inactive_temperature(self, temp,extruder):
-        params = {'S':temp,'T':extruder}
-        self.gcode._set_temp(params)
+    def set_extruder_inactive_temperature(self, temp,tool):
+        temp_dict = self.get_temp()
+        group = self.find_tool_group(tool)
+        t = ('T%s'%(self.extruder_group[group][0]))
+        if temp_dict[t]['set'] == 0:
+            return
+        else:    
+            params = {'S':temp,'T':tool}
+            self.gcode._set_temp(params)
         
-    def set_extruder_printing_temperature(self, temp,extruder):
-        params = {'S':temp,'T':extruder}
-        self._set_temp(params, wait=True)        
+    def set_extruder_printing_temperature(self, temp,tool):
+        params = {'S':temp,'T':tool}
+        self._set_temp(params, wait=True)
+        
+    def reduce_temperature(self):
+        return
         
 #load/unload to extruder
 
@@ -716,7 +758,7 @@ class MMU:
         self.mmu2mem.write(mem)
 #gcode Tn
     def cmd_Tn(self, tool):
-        self.gcode.respond_info('cmd_Tn:%i'%tool)
+        self.gcode.respond_info('>>>cmd_Tn:%i'%tool)
         #without call script
         #extruders = kinematics.extruder.get_printer_extruders(self.printer)
 
