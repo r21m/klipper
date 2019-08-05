@@ -259,7 +259,7 @@ class MMU:
                 self.store()
                 if self.temp_control:# snizit teplotu inaktivni skupiny/skupin
                     for tool in self.active_tool_in_group:
-                        if tool != self.active_tool:
+                        if (tool != self.active_tool) and (tool is not None):
                             group = self.find_tool_group(tool)
                             t = ('T%s'%self.extruder_group[group][0])
                             self.extruder_printing_temperature[group] = temp_dict[t]['set'] 
@@ -296,7 +296,7 @@ class MMU:
         #snizit teplotu inactivni skupiny/skupin
         if self.temp_control:
             for tool in self.active_tool_in_group:
-                if tool != self.active_tool:
+                if (tool != self.active_tool) and (tool is not None):
                     group = self.find_tool_group(tool)
                     t = ('T%s'%self.extruder_group[group][0])
                     self.extruder_printing_temperature[old_group] = temp_dict[t]['set'] 
