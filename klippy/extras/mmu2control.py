@@ -35,7 +35,7 @@ class MMU2control:
         ports = config.get('serial_ports')
         self.serial_ports = ports.split(',')
         self.serial_speed = self.config.getint('serial_speed', 115200)
-        self.serial_timeout = self.config.getint('serial_timeout', 0.05)
+        self.serial_timeout = self.config.getfloat('serial_timeout', 0.05)
         self.unit_count = len(self.serial_ports)
            #timeout
         self.change_timeout = config.getint('change_timeout',120)
