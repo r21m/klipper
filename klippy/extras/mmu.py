@@ -96,6 +96,8 @@ class MMU:
         logging.info(msg)
         self.gcode.respond_info(msg)
         self.m6_first_fun = True
+        if self.active_tool is not None:
+            self.cmd_Tn(self.active_tool)
         self.state = ('ready')
 
     def init_scripts(self):
@@ -109,7 +111,7 @@ class MMU:
         #self.gcode_if_runout = self.config.get('gcode_if_runout', '')   #zatim nepouzito
         
         self.gcode_filament_pullout = self.config.get('gcode_filament_pullout', '') #vytahnout
-        self.gcode_filament_introduce = self.config.get('gcode_filament_introduce', '') #zavest
+
             #list script
         self.load_unload_profiles = self.config.getint('load_unload_profiles', minval = 1, maxval = self.maxval_t, default=1)
         self.lu_mem = []
@@ -121,9 +123,13 @@ class MMU:
 
         self.gcode_old_tool = []
         self.gcode_new_tool = []
+
+        self.gcode_filament_introduce = []
         for tool in range (self.maxval_t):
             self.gcode_old_tool.append(self.config.get(('gcode_new_tool%i' %(tool)), ''))
             self.gcode_new_tool.append(self.config.get(('gcode_old_tool%i' %(tool)), ''))
+
+            self.gcode_filament_introduce = self.config.get(('gcode_filament_introduce%i'%(tool)), '') #zavest  
             self.lu_mem.append(0)
 
         self.gcode_old_group = []
@@ -387,6 +393,9 @@ class MMU:
         self.set_message('Active T:%s'%(self.active_tool))
         self.state = ('ready')
         return
+
+        #self.gcode_filament_pullout = []
+        #self.gcode_filament_introduce = []
 
     def cmd_M701(self, params):
         self.state = ('busy')
@@ -727,7 +736,7 @@ class MMU:
         self.check_extruder_temperature(group)
         self.cmd_Tn(tool)
         self.reactor_pause(2)
-        self.run_script_from_command(self.gcode_filament_introduce)
+        self.run_script_from_command(self.gcode_filament_introduce[tool])
 
         self.introduced_filament[tool] = True
         self.store()
@@ -781,7 +790,7 @@ class MMU:
         self.mmu2mem.write(mem)
 #gcode Tn
     def cmd_Tn(self, tool):
-        self.gcode.respond_info('>>>cmd_Tn:%i'%tool)
+        #self.gcode.respond_info('>>>cmd_Tn:%i'%tool)
         #without call script
         #extruders = kinematics.extruder.get_printer_extruders(self.printer)
 
@@ -791,7 +800,7 @@ class MMU:
         self.gcode.extrude_factor = 1.
         self.gcode.base_position[3] = self.gcode.last_position[3]
         self.gcode.actual_tool = tool
-
+        self.gcode.active_extruder = tool
     def get_print_time(self):
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
         return print_time
