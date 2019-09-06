@@ -72,10 +72,7 @@ class MMU:
         self.used_during_print = [0 for x in range(self.maxval_t)]
 
     def handle_ready(self):
-        msg = ('MMU: not ready')
         self.state = ('not ready')
-        logging.info(msg)
-        self.gcode.respond_info(msg)
         self.init_display()
         self.toolhead = self.printer.lookup_object('toolhead')
         self.heaters = self.printer.lookup_object('heater')
@@ -92,9 +89,7 @@ class MMU:
             self.store()
             
         #logging.info('\tmemory: %s'%(mem)) 
-        msg = ('MMU: ready')
-        logging.info(msg)
-        self.gcode.respond_info(msg)
+        self.gcode.respond_info('MMU: Ready')
         self.m6_first_fun = True
         if self.active_tool is not None:
             self.cmd_Tn(self.active_tool)
@@ -313,7 +308,7 @@ class MMU:
                     
         #info
         self.gcode.respond_info('SelectExtruder:%s'%(self.active_tool)) #response for repetierServer, rict rep.serveru ze je aktivni jiny nastroj
-        self.gcode.respond_info('MMU Tool change finished, active T:%s'%(self.active_tool))
+        self.gcode.respond_info('MMU: Tool change finished, active T:%s'%(self.active_tool))
         self.set_message('Active T:%s'%(self.active_tool))
         self.m6_first_fun = False
         self.state = ('ready')
@@ -366,7 +361,7 @@ class MMU:
                 self.load_filament_to_extruder(tool)
                 self.active_tool_in_group[group] = tool
         
-        self.gcode.respond_info('>>>multiload 2  tools:%s ' %(tools))
+        #self.gcode.respond_info('>>>multiload 2  tools:%s ' %(tools))
         #M702 compat
         for tool in tools:
             self.used_during_print[tool] += 1
@@ -389,7 +384,7 @@ class MMU:
                     self.set_extruder_inactive_temperature(inactive_temp,tool)
         
         self.gcode.respond_info('SelectExtruder:%s'%(self.active_tool)) #response for repetierServer, rict rep.serveru ze je aktivni jiny nastroj
-        self.gcode.respond_info('MMU Tool change finished, active T:%s'%(self.active_tool))
+        self.gcode.respond_info('MMU: Tool change finished, active T:%s'%(self.active_tool))
         self.set_message('Active T:%s'%(self.active_tool))
         self.state = ('ready')
         return
@@ -484,7 +479,7 @@ class MMU:
                 group = self.find_tool_group(T_param)
                 self.active_tool_in_group[group] = T_param
                 self.introduced_filament[T_param] = True
-            self.gcode.respond_info('SET_MMU: active T: %s '%(self.active_tool))
+            self.gcode.respond_info('SET_MMU: Active T: %s '%(self.active_tool))
 
         elif ('P') in params and ('T') in params:
             '''
@@ -493,7 +488,7 @@ class MMU:
             T_param = self.gcode.get_int('T', params, minval=0, maxval=self.maxval_t)
             P_param = self.gcode.get_int('P', params, minval=0, maxval=self.maxval_t)
             self.lu_mem[T_param] = P_param
-            self.gcode.respond_info('SET_MMU: set LU profile: % tool: %'%(P_param,T_param))
+            self.gcode.respond_info('SET_MMU: Set LU profile: % tool: %'%(P_param,T_param))
             
         elif ('I') in params: 
             _params = params           
@@ -505,25 +500,25 @@ class MMU:
                 else:    
                     self.introduced_filament[tool] = True
                     
-            self.gcode.respond_info('SET_MMU: introduced_filament:%s' %(self.introduced_filament))    
+            self.gcode.respond_info('SET_MMU: Introduced_filament:%s' %(self.introduced_filament))    
             
         if ('S') in params:
-            self.gcode.respond_info('SET_MMU: store')
+            self.gcode.respond_info('SET_MMU: Store')
             self.store()
 
     def cmd_QUERY_MMU(self,params):
         if self.enable: m6_stat = ('enabled')
         else: m6_stat = ('disabled')
 
-        self.gcode.respond('QUERY_MMU:\n')
+        self.gcode.respond('QUERY_MMU: \n')
         self.gcode.respond('\tM6: %s'%(m6_stat))
         tool = ('None')
         if self.active_tool != None: tool = str(self.active_tool)
         self.gcode.respond(('\tActive tool: %s')%(tool))
-        self.gcode.respond(('\tActive tool in group : %s')%(self.active_tool_in_group))
+        self.gcode.respond(('\tActive tool in group: %s')%(self.active_tool_in_group))
         self.gcode.respond(('\tL/U memory: %s')%(self.lu_mem))
         self.gcode.respond(('\tUsed during print: %s')%(self.used_during_print))
-        self.gcode.respond(('\tIntroduced_filament: %s')%(self.introduced_filament))
+        self.gcode.respond(('\tIntroduced filament: %s')%(self.introduced_filament))
 
     def cmd_TEST0(self,params):
         eventtime = self.reactor.monotonic()
@@ -581,14 +576,14 @@ class MMU:
             return None
         
         if len(tools) > self.extruder_groups:
-           self.gcode.respond_error('MMU: multitool tools > groups')
+           self.gcode.respond_error('MMU: Multitool tools > groups')
            return None
          
         diff = 0
         for tool in (tools):
             diff = self.find_tool_group(tool) - diff
         if diff == 0 and len(tools) > 1:
-            self.gcode.respond_error('MMU: multitool parameter T[0] T[1] = same group')
+            self.gcode.respond_error('MMU: Multitool parameter T[0] T[1] = same group')
             return None
         
         #doplnit 
@@ -612,20 +607,20 @@ class MMU:
         for q in (toolstring):
             try:
                 if (int(q)) > self.maxval_t:
-                    self.gcode.respond_error('MMU: multitool parameter error, too high')
+                    self.gcode.respond_error('MMU: Multitool parameter %i error, too high'%q)
                     return None
                 if (int(q)) < self.extruder_offset:
-                    self.gcode.respond_error('MMU: multitool parameter error, too low')
+                    self.gcode.respond_error('MMU: Multitool parameter %i error, too low'%q)
                     return None 
                 
                 tool_list.append(int(q))
             except ValueError:
-                self.gcode.respond_error('MMU: multitool parameter error')
+                self.gcode.respond_error('MMU: Multitool parameter error')
                 
         #tool_list = (list(dict.fromkeys(tool_list))) #remove duplicate 
                     
         if len(tool_list) > self.maxval_t:
-            self.gcode.respond_error('MMU: multitool parameter is grater than maxval_t')
+            self.gcode.respond_error('MMU: Multitool parameter is grater than maxval_t')
             return None
         else:
             return tool_list    
@@ -640,7 +635,7 @@ class MMU:
                 if len(num) == 0: num = None
                 else: num = int(num)
             except ValueError:
-                self.gcode.respond_error('MMU2 control: error in parameter: %s key: %s' %(_params,key))
+                self.gcode.respond_error('MMU2: Error in parameter: %s key: %s' %(_params,key))
                 return None, None
         return is_key,num
 
@@ -656,9 +651,9 @@ class MMU:
        temp = temp_dict[tool]['read']
        
        if temp < self.min_temp:
-           self.gcode.respond_error('MMU extruder mintemp mintemp:%s measured:%s' %(self.min_temp,temp))
+           self.gcode.respond_error('MMU: Extruder mintemp mintemp:%s measured:%s' %(self.min_temp,temp))
            self.set_message('Extr. mintemp')
-           raise homing.EndstopError('MMU: extruder mintemp:%s measured:%s'%(self.min_temp,temp))
+           raise homing.EndstopError('MMU: Extruder mintemp:%s measured:%s'%(self.min_temp,temp))
            
     def get_temp(self, _rnd = 0):
         temp_dict = {}
@@ -701,7 +696,7 @@ class MMU:
         try: profile_num = self.lu_mem[tool]
         except IndexError: profile_num = 0
 
-        self.gcode.respond_info('Load filament to extruder')
+        self.gcode.respond_info("MMU: Load filament to extruder")
         self.run_script_from_command(self.gcode_load_profile[profile_num])
 
 
@@ -714,7 +709,7 @@ class MMU:
         try: profile_num = self.lu_mem[tool]
         except IndexError: profile_num = 0
 
-        self.gcode.respond_info('Unloading filament')
+        self.gcode.respond_info("MMU: Unloading filament")
         self.run_script_from_command(self.gcode_unload_profile[profile_num])
         self.wait_for_finish_scripts()
         
@@ -754,7 +749,7 @@ class MMU:
         if self.introduced_filament[tool] is False:
             return
         if self.active_tool == tool:
-           self.gcode.respond_error("MMU: unload filament from hotend first")
+           self.gcode.respond_error("MMU: Unload filament from hotend first")
            return    
         self.wait_for_finish_scripts()
         group = self.find_tool_group(tool)
@@ -821,7 +816,7 @@ class MMU:
 
     def stats(self, eventtime):
         if self.state:
-           return False, '%s: tool:%s active tool in group:%s lu_mem:%s introduced filament:%s' % ('MMU:',
+           return False, '%s: tool:%s active tool in group:%s lu_mem:%s introduced filament:%s' % ('MMU',
            self.active_tool,self.active_tool_in_group,self.lu_mem,self.introduced_filament)
            
 ##################
