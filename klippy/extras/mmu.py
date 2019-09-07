@@ -124,7 +124,7 @@ class MMU:
             self.gcode_old_tool.append(self.config.get(('gcode_new_tool%i' %(tool)), ''))
             self.gcode_new_tool.append(self.config.get(('gcode_old_tool%i' %(tool)), ''))
 
-            self.gcode_filament_introduce = self.config.get(('gcode_filament_introduce%i'%(tool)), '') #zavest  
+            self.gcode_filament_introduce.append(self.config.get(('gcode_filament_introduce%i'%(tool)), '')) #zavest  
             self.lu_mem.append(0)
 
         self.gcode_old_group = []
@@ -402,9 +402,12 @@ class MMU:
             self.run_script_from_command(self.gcode_before_mmu)    
             tools = self.get_tool_list_from_t_param(params, ('E'))
             for tool in tools:
-                self.gcode.respond_info('M701: E%s'%(tool))
-                self.pulldown_filament(tool)
-                self.reactor_pause(2)
+                if self.introduced_filament[tool] is True:
+                    self.gcode.respond_info('M701: Filament E:%s is indroduced' %(tool))
+                else:
+                    self.gcode.respond_info('M701: Introducing E%s'%(tool))    
+                    self.pulldown_filament(tool)
+                    self.reactor_pause(2)
             self.run_script_from_command(self.gcode_after_mmu)    
             self.state = ('ready')
             return
@@ -424,11 +427,15 @@ class MMU:
         M702 E<num> or E<num>,<num> 
 
         '''
-        self.run_script_from_command(self.gcode_before_mmu)    
+        self.run_script_from_command(self.gcode_before_mmu)
+        
         if not (('U') in params) and not (('C') in params) and not(('E') in params):
             for tool in range(self.maxval_t):
-                self.pullup_filament(tool)
-                self.reactor_pause(2)
+                if self.introduced_filament[tool] is False:
+                    self.gcode.respond_info('M702: Filament T:%i is not introduced' %(tool))
+                else:    
+                    self.pullup_filament(tool)
+                    self.reactor_pause(1)
             self.run_script_from_command(self.gcode_after_mmu)        
             self.state = ('ready')
             return
@@ -445,21 +452,34 @@ class MMU:
         if ('C') in params:
             tools = self.get_tool_list_from_t_param(_params, ('C'))
             if tool == None:
-               self.pullup_filament(self.active_tool)
-               self.reactor_pause(2)
+               if self.active_tool is not None:
+                   self.pullup_filament(self.active_tool)
+                   self.reactor_pause(1)
+                   self.run_script_from_command(self.gcode_after_mmu)       
+                   self.state = ('ready')
+                   return
             for tool in tools:
-               self.pullup_filament(tool)
-               self.reactor_pause(2)
+               if self.introduced_filament[tool] is False:
+                    self.gcode.respond_info('M702: Filament T:%i is not introduced' %(tool))
+               else:     
+                   self.pullup_filament(tool)
+                   self.reactor_pause(1)
             self.run_script_from_command(self.gcode_after_mmu)       
             self.state = ('ready')
             return
             
         if ('E' in params):
             tools = self.get_tool_list_from_t_param(params, ('E'))
+            if self.active_tool in tools:
+                self.gcode.respond_error("M702: Unload filament from hot-end first")
+                return 
             for tool in tools:
-                self.gcode.respond_info('M702: E%s'%(tool))
-                self.pullup_filament(tool)
-                self.reactor_pause(2)
+                if self.introduced_filament[tool] is False:
+                    self.gcode.respond_info('M702: Filament T:%i is not introduced' %(tool))
+                else:    
+                    self.gcode.respond_info('M702: T%s'%(tool))
+                    self.pullup_filament(tool)
+                    self.reactor_pause(1)
             self.run_script_from_command(self.gcode_after_mmu)       
             self.state = ('ready')
             return    
@@ -722,15 +742,14 @@ class MMU:
         cz: zavadi filament
         pokud je jiz dle pameti pritomen, nic se neprovede
         '''
-        if self.introduced_filament[tool] is True:
-            return
-            
         self.wait_for_finish_scripts()    
 
         group = self.find_tool_group(tool)
         self.check_extruder_temperature(group)
         self.cmd_Tn(tool)
-        self.reactor_pause(2)
+        self.reactor_pause(0.5)
+        self.gcode.respond_info('TOOL %i' %tool)
+        #self.gcode.respond_info(self.gcode_filament_introduce[tool])
         self.run_script_from_command(self.gcode_filament_introduce[tool])
 
         self.introduced_filament[tool] = True
@@ -746,16 +765,12 @@ class MMU:
         provede se jeho vytazeni z hotendu podle L/U profilu
         nakonec vypne motor extruderu
         '''
-        if self.introduced_filament[tool] is False:
-            return
-        if self.active_tool == tool:
-           self.gcode.respond_error("MMU: Unload filament from hotend first")
-           return    
+  
         self.wait_for_finish_scripts()
         group = self.find_tool_group(tool)
         self.check_extruder_temperature(group)
         self.cmd_Tn(tool)
-        self.reactor_pause(1)
+        self.reactor_pause(0.5)
             
         self.run_script_from_command(self.gcode_filament_pullout)
         self.introduced_filament[tool] = False
