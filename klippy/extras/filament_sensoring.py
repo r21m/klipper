@@ -101,25 +101,28 @@ class Filament_sensoring:
         #self.reactor_pause(0.5)
             
     def read_data(self):
+        read_data_stat = None
         try:
             s = self.sens_serial.readline()
         except serial.SerialException:
            #self.state = ('serial exception')
            self.sens_serial.close()
            self.connect()
-           return 
+           read_data_stat = ('SerialException')
+            
         s = s[:-2:]
         s = s.split(',')
 
         out = []
-        try:
-            for val in s:
-               out.append(int(val))
-        except ValueError:
-            return
+        for val in s:
+           try:
+                out.append(int(val))
+           except ValueError:
+                read_data_stat = ('Fail')
+                break
             
         val_dict = {}            
-        if len(out) == (6*self.pat9125_used):
+        if (len(out) == (6*self.pat9125_used)) and not (read_data_stat):
             c = 0
             for rep in range(6):
                 tool_num = out[0+c]
@@ -137,11 +140,8 @@ class Filament_sensoring:
                     val_dict['S'] = out[5+c]
                     val_dict['F'] = bool(out[1+c]) ^ self.invert_finda
                     
-                    if (abs(val_dict['L'] - self.l_pre[tool_num]) > 5): 
-                        val_dict['M'] = ('MOVE')
-                    else:
-                        val_dict['M'] = ('STOP')   
-                    
+                    val_dict['M'] = (val_dict['L'] - self.l_pre[tool_num])
+ 
                     self.l_pre[tool_num] = val_dict['L'] 
                     self.filament_sensoring_data[mark] = val_dict
                 else:
@@ -169,7 +169,7 @@ class Filament_sensoring:
         
     def cmd_reset(self,params):
         if ('R') in params:
-            num = params['R']
+            num = int(params['R'])
             self.reset_pat(num)
             self.gcode.respond_info("FS: Resetting %i" %num)
         return
@@ -278,7 +278,7 @@ class Filament_sensoring:
                     lenght_m = (data['Lmm'] / 1000)
                     cal_l = self.pat9125_mm_factor[active_extruder]
                     move = data['M']
-                    return False, 'FS: %s filament:%s lenght:%0.3f m cal_l:%0.6f move:%s'%(t,finda,lenght_m,cal_l,move)
+                    return False, 'FS: %s filament:%s lenght:%0.3f m cal_l:%0.6f move:%i'%(t,finda,lenght_m,cal_l,move)
                 except KeyError:
                     return False, 'FS: FAIL'
                 
