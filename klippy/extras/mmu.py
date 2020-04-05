@@ -26,9 +26,7 @@ class MMU:
         self.printer.register_event_handler("extruder:activate_extruder", self.handle_activate_extruder)
         self.heaters = None
         self.gcode_id = None
-            #parameters
-        self.enable = self.config.getboolean('enable', False) #M6
-            #definition
+            #parameters           
         self.extruder_group = []
         self.extruder_offset = self.config.getint('extruder_offset', minval=0, default=0)
         self.extruder_groups = self.config.getint('extruder_groups', minval=1, default=1)
@@ -49,7 +47,7 @@ class MMU:
                 self.extruder_group[q].append(num)
                 num += 1
            #check temp
-        self.min_temp = self.config.getint('min_temp', minval=190, default=210)
+        self.min_temp = self.config.getint('min_temp', minval=190, default=190)
            #temp control for inactive extruder
         self.temp_control = self.config.getboolean('temp_control', False)
         self.extruder_printing_temperature = [0 for x in range(self.extruder_groups)]
@@ -221,11 +219,6 @@ class MMU:
 
         self.state = ('busy')
         tool = None 
-
-        if not (self.enable):
-            self.gcode.respond_error('MMU M6: not enabled, use <SET_MMU A> to enable')
-            self.state = ('ready')
-            return
                            
         if not ('T') in params:
             self.gcode.respond_error('MMU M6: <Tnum> missing')
@@ -257,6 +250,11 @@ class MMU:
            
     def singleload(self,tool):
 
+        if tool == self.active_tool:
+            self.gcode.respond('MMU: M6: T<new> == T<old>')
+            self.state = ('ready')
+            return
+
         tool_group = self.find_tool_group(tool)
         old_tool_in_group = None
         old_group = None
@@ -270,15 +268,10 @@ class MMU:
             temp_dict = self.get_temp() 
               
         if not self.introduced_filament[tool]: 
-            self.gcode.respond_error('MMU M6: error, filament is not introduced') #zmenit na raise exception.......
+            self.gcode.respond_error('MMU: M6: error, filament is not introduced') #zmenit na raise exception.......
             self.state = ('ready')
             return         
-        
-        if tool == self.active_tool:
-            self.gcode.respond('MMU M6: T<new> == T<old>')
-            self.state = ('ready')
-            return
-                 
+                       
         self.run_script_from_command(self.gcode_before_m6)
         # pokud je zadany nastroj aktivni v dalsi skupine,snizit teplotu stavajiciho, aktivovat a return
 
@@ -338,7 +331,7 @@ class MMU:
                     
         #info
         self.gcode.respond_info('SelectExtruder:%s'%(self.active_tool)) #response for repetierServer, rict rep.serveru ze je aktivni jiny nastroj
-        self.gcode.respond_info('MMU: Tool change finished, active T:%s'%(self.active_tool))
+        self.gcode.respond_info('MMU: M6: Tool change finished, active T:%s'%(self.active_tool))
         self.m6_first_run = False
         self.state = ('ready')
         return
@@ -346,85 +339,71 @@ class MMU:
     def cmd_M701(self, params):
         self.state = ('busy')
         '''
-        load filament to MMU
-        M701 E<num>
+        M701 T<num>
         '''
         if (('T')) in params:
             tool = self.gcode.get_int('T', params, minval = 0, maxval = self.maxval_t)
             self.run_script_from_command(self.gcode_before_intr_pull)
             if self.introduced_filament[tool] is True:
-                self.gcode.respond_info('M701: Filament E:%s is indroduced' %(tool))
+                self.gcode.respond_info('MMU: M701: Filament E:%s is indroduced' %(tool))
             else:
-                self.gcode.respond_info('M701: Introducing E%s'%(tool))    
+                self.gcode.respond_info('MMU: M701: Introducing E%s'%(tool))    
                 self.pulldown_filament(tool)
                 self.reactor_pause(2)
             self.run_script_from_command(self.gcode_after_intr_pull)
+            #restore active
             if self.active_tool is not None:
                 self.activate_extruder(self.active_tool)
             self.state = ('ready')
             return
         else:
-            self.gcode.respond_error('M701: parameter error')
+            self.gcode.respond_error('MMU: M701: parameter error')
             self.state = ('ready')
 
     def cmd_M702(self, params):
         self.state = ('busy')
         '''
         M702 T<num>  
-
         '''
         self.run_script_from_command(self.gcode_before_intr_pull)
                     
         if ('T' in params):
             tool = self.gcode.get_int('T', params, minval = 0, maxval = self.maxval_t)
             if self.introduced_filament[tool] is False:
-                self.gcode.respond_info('M702: Filament T:%i is not introduced' %(tool))             
+                self.gcode.respond_info('MMU: M702: Filament T:%i is not introduced' %(tool))             
             if self.active_tool == tool:
                 self.unload_filament_from_extruder(tool)
                 self.active_tool_in_group[self.find_tool_group(tool)] = None
                 self.active_tool = None 
             else:    
-                self.gcode.respond_info('M702: T%s'%(tool))
+                self.gcode.respond_info('MMU: M702: T%s'%(tool))
                 self.pullup_filament(tool)
                 self.reactor_pause(1)
             self.run_script_from_command(self.gcode_after_intr_pull)
+            #restore active
             if self.active_tool is not None:
                 self.activate_extruder(self.active_tool)       
             self.state = ('ready')
             return
         else:
-            self.gcode.respond_error('M702: parameter error')
+            self.gcode.respond_error('MMU: M702: parameter error')
             self.state = ('ready')    
                 
-
     def cmd_SET_MMU(self,params):
         self.gcode.respond_info(str(params))
 
-        if ('A') in params:
-           self.enable = True
-           self.gcode.respond_info('M6 enabled')
-           self.state = ('ready')
-           return
-
-        if ('D') in params:
-            self.enable = False
-            self.gcode.respond_info('M6 disabled')
-            self.state = ('ready')
-            return
-
         if ('T' in params): #set active tool
-            if params['T'] == ('') or None:
-                #kdyz je T<None> nastavit None
+            tool = self.gcode.get_int('T', params, minval = -1, maxval = self.maxval_t)
+            if tool = -1:
                 for q in range(self.extruder_groups):
                     self.active_tool_in_group[q] = None
                 self.active_tool = None
-            else:
-                T_param = self.gcode.get_int('T', params, minval = 0, maxval = self.maxval_t)
-                self.active_tool = T_param
-                group = self.find_tool_group(T_param)
-                self.active_tool_in_group[group] = T_param
-                self.introduced_filament[T_param] = True
-            self.gcode.respond_info('SET_MMU: Active T: %s '%(self.active_tool))
+            else:   
+                self.active_tool = tool
+                group = self.find_tool_group(tool)
+                self.active_tool_in_group[group] = tool
+                self.introduced_filament[tool] = True
+            self.gcode.respond_info('MMU: SET_MMU: Active T: %s '%(self.active_tool))
             
         elif ('I') in params: 
             tool = params['I']
@@ -432,18 +411,15 @@ class MMU:
                 self.introduced_filament[tool] = False
             else:    
                 self.introduced_filament[tool] = True         
-            self.gcode.respond_info('SET_MMU: Introduced_filament:%s' %(self.introduced_filament))    
+            self.gcode.respond_info('MMU: SET_MMU: Introduced_filament:%s' %(self.introduced_filament))    
             
         if ('S') in params:
-            self.gcode.respond_info('SET_MMU: Store')
+            self.gcode.respond_info('MMU: SET_MMU: Store')
             self.store()
 
     def cmd_QUERY_MMU(self,params):
-        if self.enable: m6_stat = ('enabled')
-        else: m6_stat = ('disabled')
 
         self.gcode.respond('QUERY_MMU: \n')
-        self.gcode.respond('\tM6: %s'%(m6_stat))
         tool = ('None')
         if self.active_tool != None: tool = str(self.active_tool)
         self.gcode.respond(('\tActive tool: %s')%(tool))
@@ -539,21 +515,18 @@ class MMU:
 #load/unload to extruder
 
     def load_filament_to_extruder(self,tool):
-        self.wait_for_finish_scripts()
         self.activate_extruder(tool)
         self.check_extruder_temperature(self.find_tool_group(tool))
         self.gcode.respond_info("MMU: Load filament to extruder")
         self.run_script_from_command(self.gcode_load)
 
     def unload_filament_from_extruder(self,tool):
-        self.wait_for_finish_scripts()
         self.activate_extruder(tool)
         self.check_extruder_temperature(self.find_tool_group(tool))        
         self.gcode.respond_info("MMU: Unloading filament")
         self.run_script_from_command(self.gcode_unload)
         
     def pulldown_filament(self, tool):
-        self.wait_for_finish_scripts()
         self.check_extruder_temperature(self.find_tool_group(tool))
         self.activate_extruder(tool)
         self.reactor_pause(1)
@@ -563,7 +536,6 @@ class MMU:
         return
 
     def pullup_filament(self, tool):
-        self.wait_for_finish_scripts()
         self.check_extruder_temperature(self.find_tool_group(tool))
         self.activate_extruder(tool)
         self.reactor_pause(1)     
@@ -606,7 +578,6 @@ class MMU:
         #self.toolhead.flush_step_generation()
         #self.toolhead.set_extruder(tool, 0)
         logging.info("MMU: Activating extruder %i" %(tool))
-
         #
     def get_print_time(self):
         print_time = self.printer.lookup_object('toolhead').get_last_move_time()
